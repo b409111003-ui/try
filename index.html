@@ -11,15 +11,21 @@
       position: absolute; top: 10px; left: 10px;
       background: white; padding: 10px; border-radius: 8px;
       box-shadow: 0 2px 6px rgba(0,0,0,0.2); z-index: 1000;
+      font-size: 14px;
+    }
+    .controls label { display: block; margin: 4px 0; }
+    .controls button {
+      margin-top: 6px; padding: 4px 8px; border-radius: 6px; border: none;
+      background: #4CAF50; color: white; cursor: pointer;
     }
   </style>
 </head>
 <body>
   <div class="controls">
-    <label><input type="checkbox" value="water"> 飲水機</label><br>
-    <label><input type="checkbox" value="convenience"> 便利商店</label><br>
-    <label><input type="checkbox" value="market"> 市場</label><br>
-    <label><input type="checkbox" value="park"> 公園</label><br>
+    <label><input type="checkbox" value="water"> 飲水機</label>
+    <label><input type="checkbox" value="convenience"> 便利商店</label>
+    <label><input type="checkbox" value="market"> 市場</label>
+    <label><input type="checkbox" value="park"> 公園</label>
     <button id="searchBtn">搜尋附近</button>
   </div>
   <div id="map"></div>
@@ -80,10 +86,13 @@
       let body = '[out:json][timeout:25];(';
       for (const sel of selections) {
         let fragment = categories[sel];
-        fragment = fragment.replace(/RADIUS/g, radius).replace(/LAT/g, lat).replace(/LON/g, lon);
-        body += fragment;
+        fragment = fragment
+          .replace(/RADIUS/g, radius)
+          .replace(/LAT/g, lat)
+          .replace(/LON/g, lon);
+        body += "\n" + fragment;  // ⚡ 確保換行，避免拼接錯誤
       }
-      body += ');out center;';
+      body += '\n);out center;';
       return body;
     }
 
