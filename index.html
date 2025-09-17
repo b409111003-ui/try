@@ -1,152 +1,81 @@
 <!doctype html>
 <html lang="zh-Hant">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>附近補給 & 導航示範 (Leaflet + Overpass + OSRM)</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>社區散步友善地圖</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
   <style>
-    html,body,#map { height: 100%; margin: 0; padding: 0; }
-    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans CJK TC", "PingFang TC", "Microsoft JhengHei", sans-serif; }
-    #controls {
-      position: absolute;
-      left: 12px;
-      top: 12px;
-      z-index: 1000;
-      background: rgba(255,255,255,0.95);
-      padding: 10px;
-      border-radius: 8px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-      min-width: 220px;
+    #map { height: 100vh; }
+    .controls {
+      position: absolute; top: 10px; left: 10px;
+      background: white; padding: 10px; border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.2); z-index: 1000;
     }
-    #status { font-size: 13px; color: #333; margin-top: 6px; }
-    #radiusInput { width: 80px; }
-    .btn { margin-top:8px; display:inline-block; padding:6px 10px; border-radius:6px; border:1px solid #888; background:#fff; cursor:pointer; }
-    .btn-primary { background:#0b7; border-color:#0a6; color:#063; }
-    .small { font-size:13px; color:#555; margin-top:6px; display:block; }
-    a.inline-link { color:#06c; text-decoration: none; font-size:13px; margin-left:6px; }
   </style>
 </head>
 <body>
-  <div id="controls">
-    <div style="font-weight:600; margin-bottom:6px;">附近搜尋與導航</div>
-
-    <div>
-      <label><input type="checkbox" id="chk_drinking" checked> 飲水機 (drinking_water)</label><br>
-      <label><input type="checkbox" id="chk_convenience" checked> 便利商店 (convenience)</label><br>
-      <label><input type="checkbox" id="chk_market"> 市場 / 超市 (marketplace / supermarket)</label><br>
-      <label><input type="checkbox" id="chk_park" checked> 公園 (park)</label>
-    </div>
-
-    <div style="margin-top:8px;">
-      搜尋範圍: <input id="radiusInput" type="number" value="1500"> 公尺
-    </div>
-
-    <div style="margin-top:8px;">
-      <button id="btnSearch" class="btn btn-primary">搜尋附近</button>
-      <button id="btnClear" class="btn">清除標記</button>
-    </div>
-
-    <div id="status">定位中…（瀏覽器會要求定位權限）</div>
-    <div class="small">提示：點選 POI popup 的「導航」會畫出路徑並提供用 Google Maps 開啟的連結。</div>
+  <div class="controls">
+    <label><input type="checkbox" value="water"> 飲水機</label><br>
+    <label><input type="checkbox" value="convenience"> 便利商店</label><br>
+    <label><input type="checkbox" value="market"> 市場</label><br>
+    <label><input type="checkbox" value="park"> 公園</label><br>
+    <button id="searchBtn">搜尋附近</button>
   </div>
-
   <div id="map"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script>
-    // ---------- 設定 ----------
-    const overpassUrl = 'https://overpass-api.de/api/interpreter'; // Overpass public endpoint
-    const osrmUrl = 'https://router.project-osrm.org/route/v1/driving/'; // OSRM demo server
-
-    // POI 類別對應 Overpass filter
-    const categories = {
-      drinking: '(node["amenity"="drinking_water"](around:RADIUS,LAT,LON);)',
-      convenience: '(node["shop"="convenience"](around:RADIUS,LAT,LON);node["amenity"="convenience"](around:RADIUS,LAT,LON);)',
-      market: '(node["amenity"="marketplace"](around:RADIUS,LAT,LON);node["shop"="supermarket"](around:RADIUS,LAT,LON);node["shop"="market"](around:RADIUS,LAT,LON);)',
-      park: '(node["leisure"="park"](around:RADIUS,LAT,LON);way["leisure"="park"](around:RADIUS,LAT,LON);relation["leisure"="park"](around:RADIUS,LAT,LON);)'
-    };
-
-    // ---------- 建立地圖 ----------
-    const map = L.map('map', { zoomControl: true }).setView([25.0330, 121.5654], 15); // 預設為台北市中心
+    // 初始化地圖
+    const map = L.map('map').setView([25.0330, 121.5654], 15);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
-      attribution: '&copy; OpenStreetMap contributors'
+      attribution: '© OpenStreetMap'
     }).addTo(map);
 
-    // user marker (circle) and tracking
-    let userMarker = null;
-    let userAccuracyCircle = null;
-    let watchId = null;
-    let currentPos = null;
-
-    // cluster / markers container
-    const markers = L.featureGroup().addTo(map);
-    let currentRoute = null;
-
-    // icons
-    const icons = {
-      user: L.icon({ iconUrl: 'https://upload.wikimedia.org/wikipedia/commons/8/8f/Map_marker.svg', iconSize: [22, 36], iconAnchor: [11,36] }),
-      drinking: L.icon({ iconUrl: 'https://cdn.jsdelivr.net/gh/atomicptr/poi-icons@main/water-fountain.png', iconSize: [30,30], iconAnchor:[15,30] }),
-      convenience: L.icon({ iconUrl: 'https://cdn.jsdelivr.net/gh/atomicptr/poi-icons@main/convenience-store.png', iconSize: [30,30], iconAnchor:[15,30] }),
-      market: L.icon({ iconUrl: 'https://cdn.jsdelivr.net/gh/atomicptr/poi-icons@main/market.png', iconSize: [30,30], iconAnchor:[15,30] }),
-      park: L.icon({ iconUrl: 'https://cdn.jsdelivr.net/gh/atomicptr/poi-icons@main/park.png', iconSize: [30,30], iconAnchor:[15,30] })
-    };
-
-    // fallback icons if external icon fails
-    for (let k in icons) {
-      if (!icons[k]) icons[k] = L.Icon.Default();
-    }
-
-    // ---------- 取得並持續追蹤定位 ----------
-    const statusEl = document.getElementById('status');
-    function startTracking() {
-      if (!navigator.geolocation) {
-        statusEl.textContent = '瀏覽器不支援定位 (Geolocation)。';
-        return;
-      }
-
-      // 初始位置一次性 getCurrentPosition（加快第一次定位）
-      navigator.geolocation.getCurrentPosition(pos => {
-        handlePosition(pos);
-        map.setView([pos.coords.latitude, pos.coords.longitude], 16);
-      }, err => {
-        statusEl.textContent = '無法取得定位權限或定位失敗。';
-        console.warn(err);
-      }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 8000 });
-
-      // 持續追蹤
-      watchId = navigator.geolocation.watchPosition(handlePosition, err => {
-        console.warn('watch error', err);
-        statusEl.textContent = '定位錯誤：' + err.message;
-      }, { enableHighAccuracy: true, maximumAge: 2000, timeout: 10000 });
-    }
-
-    function handlePosition(pos) {
-      currentPos = pos;
+    // 使用者位置
+    let userMarker;
+    navigator.geolocation.watchPosition(pos => {
       const lat = pos.coords.latitude;
       const lon = pos.coords.longitude;
-      const acc = pos.coords.accuracy;
-
-      statusEl.textContent = `定位準確度 ${Math.round(acc)} 公尺（最後更新 ${new Date().toLocaleTimeString()}）`;
-
-      // 更新或建立 marker & accuracy circle
       if (!userMarker) {
-        userMarker = L.marker([lat,lon], { icon: icons.user }).addTo(map).bindPopup('你在這裡');
+        userMarker = L.marker([lat, lon]).addTo(map).bindPopup("你在這裡");
+        map.setView([lat, lon], 16);
       } else {
-        userMarker.setLatLng([lat,lon]);
+        userMarker.setLatLng([lat, lon]);
       }
-      if (!userAccuracyCircle) {
-        userAccuracyCircle = L.circle([lat,lon], { radius: acc }).addTo(map);
-      } else {
-        userAccuracyCircle.setLatLng([lat,lon]);
-        userAccuracyCircle.setRadius(acc);
-      }
-    }
+    });
 
-    // ---------- Overpass 查詢 / 建立 query ----------
+    // Icon 定義
+    const icons = {
+      water: L.icon({
+        iconUrl: "https://cdn-icons-png.flaticon.com/512/4150/4150904.png", // 飲水機
+        iconSize: [30, 30]
+      }),
+      convenience: L.icon({
+        iconUrl: "https://cdn-icons-png.flaticon.com/512/868/868786.png", // 便利商店
+        iconSize: [30, 30]
+      }),
+      market: L.icon({
+        iconUrl: "https://cdn-icons-png.flaticon.com/512/3075/3075977.png", // 市場
+        iconSize: [30, 30]
+      }),
+      park: L.icon({
+        iconUrl: "https://cdn-icons-png.flaticon.com/512/684/684908.png", // 公園
+        iconSize: [30, 30]
+      })
+    };
+
+    // 分類對應 OSM
+    const categories = {
+      water: 'node["amenity"="drinking_water"](around:RADIUS,LAT,LON);',
+      convenience: 'node["shop"="convenience"](around:RADIUS,LAT,LON);',
+      market: 'node["amenity"="marketplace"](around:RADIUS,LAT,LON);',
+      park: 'way["leisure"="park"](around:RADIUS,LAT,LON);'
+    };
+
+    // 組合 Overpass Query
     function buildOverpassQuery(lat, lon, radius, selections) {
-      // selections: array of keys in categories e.g. ['drinking','convenience']
       if (!selections || selections.length === 0) return null;
       let body = '[out:json][timeout:25];(';
       for (const sel of selections) {
@@ -154,194 +83,55 @@
         fragment = fragment.replace(/RADIUS/g, radius).replace(/LAT/g, lat).replace(/LON/g, lon);
         body += fragment;
       }
-      body += ');out center meta;'; // out center - for ways/relations give center
+      body += ');out center;';
       return body;
     }
 
-    async function fetchOverpass(query) {
-      const resp = await fetch(overpassUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
-        body: new URLSearchParams({ data: query })
-      });
-      if (!resp.ok) throw new Error('Overpass API error: ' + resp.status);
-      return resp.json();
-    }
-
-    // map the Overpass element to LatLng and name
-    function elementToLatLng(el) {
-      if (el.type === 'node') return [el.lat, el.lon];
-      if (el.center) return [el.center.lat, el.center.lon];
-      if (el.lat && el.lon) return [el.lat, el.lon];
-      return null;
-    }
-
-    // ---------- 處理搜尋按鈕 ----------
-    document.getElementById('btnSearch').addEventListener('click', async () => {
-      // require current position
-      if (!currentPos) {
-        alert('尚未有定位，請允許定位並等候定位資訊。');
+    // 搜尋並顯示
+    document.getElementById("searchBtn").addEventListener("click", () => {
+      if (!userMarker) {
+        alert("尚未取得定位");
+        return;
+      }
+      const pos = userMarker.getLatLng();
+      const checked = Array.from(document.querySelectorAll("input[type=checkbox]:checked")).map(c => c.value);
+      const query = buildOverpassQuery(pos.lat, pos.lng, 1000, checked); // 1 公里範圍
+      if (!query) {
+        alert("請先選擇要搜尋的類別");
         return;
       }
 
-      const rad = Number(document.getElementById('radiusInput').value) || 1500;
-      const sels = [];
-      if (document.getElementById('chk_drinking').checked) sels.push('drinking');
-      if (document.getElementById('chk_convenience').checked) sels.push('convenience');
-      if (document.getElementById('chk_market').checked) sels.push('market');
-      if (document.getElementById('chk_park').checked) sels.push('park');
-      if (sels.length === 0) {
-        alert('請至少勾選一個搜尋分類。');
-        return;
-      }
-
-      statusEl.textContent = '搜尋中…（Overpass）';
-      const q = buildOverpassQuery(currentPos.coords.latitude, currentPos.coords.longitude, rad, sels);
-      try {
-        const data = await fetchOverpass(q);
-        markers.clearLayers();
-        if (currentRoute) { map.removeLayer(currentRoute); currentRoute = null; }
-
-        if (!data.elements || data.elements.length === 0) {
-          statusEl.textContent = `在 ${rad} 公尺內找不到符合條件的項目。`;
-          return;
-        }
-
-        // add markers
+      fetch("https://overpass-api.de/api/interpreter", {
+        method: "POST",
+        body: query
+      })
+      .then(r => r.json())
+      .then(data => {
         data.elements.forEach(el => {
-          const latlng = elementToLatLng(el);
-          if (!latlng) return;
-          const tags = el.tags || {};
-          const name = tags.name || (tags.operator ? tags.operator : '名稱未知');
-          // guess category from tags
-          let cat = 'other';
-          if (tags.amenity === 'drinking_water') cat = 'drinking';
-          if (tags.shop === 'convenience' || tags.amenity === 'convenience') cat = 'convenience';
-          if (tags.amenity === 'marketplace' || tags.shop === 'supermarket' || tags.shop === 'market') cat = 'market';
-          if (tags.leisure === 'park') cat = 'park';
+          const lat = el.lat || el.center?.lat;
+          const lon = el.lon || el.center?.lon;
+          if (!lat || !lon) return;
 
-          const icon = icons[cat] || icons['market'];
+          // 判斷類別 → 設定 icon
+          let matchedType = null;
+          if (el.tags) {
+            if (el.tags.amenity === "drinking_water") matchedType = "water";
+            else if (el.tags.shop === "convenience") matchedType = "convenience";
+            else if (el.tags.amenity === "marketplace") matchedType = "market";
+            else if (el.tags.leisure === "park") matchedType = "park";
+          }
 
-          const marker = L.marker(latlng, { icon }).addTo(markers);
-
-          const distance = haversineDistance([currentPos.coords.latitude, currentPos.coords.longitude], latlng);
-          const popupHtml = `<div style="font-weight:600">${escapeHtml(name)}</div>
-            <div style="font-size:13px; margin-top:4px;">距離：約 ${Math.round(distance)} 公尺</div>
-            <div style="margin-top:6px;">
-              <button class="navBtn" data-lat="${latlng[0]}" data-lon="${latlng[1]}" style="padding:6px 8px; border-radius:6px; border:1px solid #0a6; background:#eafff5; cursor:pointer;">導航</button>
-              <a class="inline-link" target="_blank" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(latlng[0]+','+latlng[1])}">在 Google Maps 開啟</a>
-            </div>`;
-          marker.bindPopup(popupHtml);
-          // attach click to popup after open
-          marker.on('popupopen', (ev) => {
-            const btn = ev.popup._contentNode.querySelector('.navBtn');
-            if (btn) {
-              btn.addEventListener('click', () => {
-                const destLat = btn.dataset.lat;
-                const destLon = btn.dataset.lon;
-                routeTo([Number(destLat), Number(destLon)]);
-              });
-            }
-          });
+          const marker = L.marker([lat, lon], { icon: matchedType ? icons[matchedType] : undefined }).addTo(map);
+          marker.bindPopup(`
+            <b>${el.tags.name || matchedType || "地點"}</b><br>
+            <a href="https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}" target="_blank">導航</a>
+          `);
         });
-
-        // fit to markers + user
-        const group = L.featureGroup([markers, userMarker].filter(Boolean));
-        map.fitBounds(group.getBounds().pad(0.4));
-        statusEl.textContent = `找到 ${data.elements.length} 個項目（顯示在地圖上）。點選標記可開啟 popup 並導航。`;
-      } catch (e) {
-        console.error(e);
-        statusEl.textContent = '搜尋失敗：' + e.message;
-      }
-    });
-
-    document.getElementById('btnClear').addEventListener('click', () => {
-      markers.clearLayers();
-      if (currentRoute) { map.removeLayer(currentRoute); currentRoute = null; }
-    });
-
-    // ---------- 路由（OSRM） ----------
-    async function routeTo(destLatLng) {
-      if (!currentPos) { alert('尚未取得目前位置'); return; }
-      const src = [currentPos.coords.longitude, currentPos.coords.latitude];
-      const dst = [destLatLng[1], destLatLng[0]];
-      const url = `${osrmUrl}${src[0]},${src[1]};${dst[0]},${dst[1]}?overview=full&geometries=geojson&steps=false`;
-      statusEl.textContent = '計算路徑中…';
-      try {
-        const resp = await fetch(url);
-        if (!resp.ok) throw new Error('OSRM 錯誤 ' + resp.status);
-        const j = await resp.json();
-        if (!j.routes || j.routes.length === 0) { statusEl.textContent = '無法取得路線。'; return; }
-
-        const route = j.routes[0];
-        const coords = route.geometry.coordinates.map(c => [c[1], c[0]]);
-        if (currentRoute) { map.removeLayer(currentRoute); currentRoute = null; }
-        currentRoute = L.polyline(coords, { weight: 5, opacity: 0.85 }).addTo(map);
-        map.fitBounds(currentRoute.getBounds().pad(0.4));
-        const meters = Math.round(route.distance);
-        const mins = Math.round(route.duration / 60);
-        statusEl.textContent = `路線已畫出：${meters} 公尺，約 ${mins} 分鐘。下方按鈕可於 Google Maps 開啟導航。`;
-
-        // open popup-ish control with Google Maps link
-        const googleUrl = `https://www.google.com/maps/dir/?api=1&origin=${currentPos.coords.latitude},${currentPos.coords.longitude}&destination=${destLatLng[0]},${destLatLng[1]}&travelmode=driving`;
-        // show small alert-like link
-        if (!document.getElementById('gmLink')) {
-          const el = document.createElement('div');
-          el.id = 'gmLink';
-          el.style.position = 'absolute';
-          el.style.left = '12px';
-          el.style.bottom = '12px';
-          el.style.zIndex = 1000;
-          el.style.background = 'rgba(255,255,255,0.95)';
-          el.style.padding = '8px';
-          el.style.borderRadius = '8px';
-          el.style.boxShadow = '0 2px 6px rgba(0,0,0,0.12)';
-          el.innerHTML = `<a id="gmOpen" target="_blank" href="${googleUrl}" style="text-decoration:none;color:#fff;background:#1a73e8;padding:8px 12px;border-radius:6px;">在 Google Maps 開啟導航</a>
-                          <button id="gmClose" style="margin-left:8px;padding:6px 8px;border-radius:6px;">關閉</button>`;
-          document.body.appendChild(el);
-          document.getElementById('gmClose').addEventListener('click', () => el.remove());
-        } else {
-          document.getElementById('gmOpen').href = googleUrl;
-        }
-
-      } catch (e) {
-        console.error(e);
-        statusEl.textContent = '路徑計算失敗：' + e.message;
-      }
-    }
-
-    // ---------- 公用工具 ----------
-    function haversineDistance([lat1,lon1],[lat2,lon2]) {
-      // returns distance in meters
-      function toRad(x){ return x * Math.PI / 180; }
-      const R = 6371000;
-      const dLat = toRad(lat2 - lat1);
-      const dLon = toRad(lon2 - lon1);
-      const a = Math.sin(dLat/2)*Math.sin(dLat/2) + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)*Math.sin(dLon/2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      return R * c;
-    }
-
-    function escapeHtml(s) {
-      if (!s) return '';
-      return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-    }
-
-    // ---------- 啟動 ----------
-    startTracking();
-
-    // Optional: stop tracking when page hidden (節省手機電量)
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) {
-        //navigator.geolocation.clearWatch(watchId); // 如果你想停止追蹤，可啟用
-      } else {
-        //startTracking();
-      }
-    });
-
-    // Clean up on unload
-    window.addEventListener('beforeunload', () => {
-      if (watchId) navigator.geolocation.clearWatch(watchId);
+      })
+      .catch(err => {
+        console.error(err);
+        alert("查詢失敗，請稍後再試");
+      });
     });
   </script>
 </body>
