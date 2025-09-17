@@ -14,6 +14,7 @@
       font-size: 14px;
     }
     .controls label { display: block; margin: 4px 0; }
+    .controls input[type="number"] { width: 80px; }
     .controls button {
       margin-top: 6px; padding: 4px 8px; border-radius: 6px; border: none;
       background: #4CAF50; color: white; cursor: pointer;
@@ -26,14 +27,17 @@
     <label><input type="checkbox" value="convenience"> 便利商店</label>
     <label><input type="checkbox" value="market"> 市場</label>
     <label><input type="checkbox" value="park"> 公園</label>
+    <label>搜尋半徑 (公尺)：<input type="number" id="radiusInput" value="1000" min="100" step="100"></label>
     <button id="searchBtn">搜尋附近</button>
   </div>
   <div id="map"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script>
-    // 初始化地圖
-    const map = L.map('map').setView([25.0330, 121.5654], 15);
+    // 初始化地圖，放大縮小鍵移到右下角
+    const map = L.map('map', { zoomControl: false }).setView([25.0330, 121.5654], 15);
+    L.control.zoom({ position: "bottomright" }).addTo(map);
+
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '© OpenStreetMap'
@@ -52,22 +56,22 @@
       }
     });
 
-    // Icon 定義
+    // Icon 定義（改成你要的樣式）
     const icons = {
       water: L.icon({
-        iconUrl: "https://cdn-icons-png.flaticon.com/512/4150/4150904.png", // 飲水機
+        iconUrl: "https://cdn-icons-png.flaticon.com/512/2910/2910768.png", // 水滴
         iconSize: [30, 30]
       }),
       convenience: L.icon({
-        iconUrl: "https://cdn-icons-png.flaticon.com/512/868/868786.png", // 便利商店
+        iconUrl: "https://openmoji.org/data/color/svg/1F3EA.svg", // 🏪 emoji
         iconSize: [30, 30]
       }),
       market: L.icon({
-        iconUrl: "https://cdn-icons-png.flaticon.com/512/3075/3075977.png", // 市場
+        iconUrl: "https://cdn-icons-png.flaticon.com/512/415/415682.png", // 蔬果
         iconSize: [30, 30]
       }),
       park: L.icon({
-        iconUrl: "https://cdn-icons-png.flaticon.com/512/684/684908.png", // 公園
+        iconUrl: "https://cdn-icons-png.flaticon.com/512/427/427735.png", // 樹
         iconSize: [30, 30]
       })
     };
@@ -97,6 +101,7 @@
     }
 
     // 搜尋並顯示
+    let searchMarkers = []; // 存放搜尋結果的 marker
     document.getElementById("searchBtn").addEventListener("click", () => {
       if (!userMarker) {
         alert("尚未取得定位");
@@ -104,11 +109,16 @@
       }
       const pos = userMarker.getLatLng();
       const checked = Array.from(document.querySelectorAll("input[type=checkbox]:checked")).map(c => c.value);
-      const query = buildOverpassQuery(pos.lat, pos.lng, 1000, checked); // 1 公里範圍
+      const radius = parseInt(document.getElementById("radiusInput").value) || 1000;
+      const query = buildOverpassQuery(pos.lat, pos.lng, radius, checked);
       if (!query) {
         alert("請先選擇要搜尋的類別");
         return;
       }
+
+      // 清除舊的搜尋結果
+      searchMarkers.forEach(m => map.removeLayer(m));
+      searchMarkers = [];
 
       fetch("https://overpass-api.de/api/interpreter", {
         method: "POST",
@@ -138,6 +148,7 @@
             <b>${el.tags.name || matchedType || "地點"}</b><br>
             <a href="https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}" target="_blank">導航</a>
           `);
+          searchMarkers.push(marker);
         });
       })
       .catch(err => {
