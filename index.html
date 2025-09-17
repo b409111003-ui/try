@@ -11,13 +11,20 @@
       position: absolute; top: 10px; left: 10px;
       background: white; padding: 10px; border-radius: 8px;
       box-shadow: 0 2px 6px rgba(0,0,0,0.2); z-index: 1000;
-      font-size: 14px;
+      font-size: 14px; width: 140px;
     }
     .controls label { display: block; margin: 4px 0; }
-    .controls input[type="number"] { width: 80px; }
+    .controls input[type="number"] {
+      width: 100%; box-sizing: border-box; margin-top: 4px; padding: 4px;
+    }
     .controls button {
-      margin-top: 6px; padding: 4px 8px; border-radius: 6px; border: none;
-      background: #4CAF50; color: white; cursor: pointer;
+      margin-top: 6px; padding: 6px 8px; border-radius: 6px; border: none;
+      background: #4CAF50; color: white; cursor: pointer; width: 100%;
+    }
+    .emoji-icon {
+      font-size: 24px;
+      text-align: center;
+      line-height: 24px;
     }
   </style>
 </head>
@@ -27,16 +34,18 @@
     <label><input type="checkbox" value="convenience"> 便利商店</label>
     <label><input type="checkbox" value="market"> 市場</label>
     <label><input type="checkbox" value="park"> 公園</label>
-    <label>搜尋半徑 (公尺)：<input type="number" id="radiusInput" value="1000" min="100" step="100"></label>
+    <label>搜尋半徑 (公尺)
+      <input type="number" id="radiusInput" value="500" min="100" step="100">
+    </label>
     <button id="searchBtn">搜尋附近</button>
   </div>
   <div id="map"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script>
-    // 初始化地圖，放大縮小鍵移到右下角
+    // 初始化地圖，將縮放控制放到右下
     const map = L.map('map', { zoomControl: false }).setView([25.0330, 121.5654], 15);
-    L.control.zoom({ position: "bottomright" }).addTo(map);
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
@@ -56,24 +65,21 @@
       }
     });
 
-    // Icon 定義（改成你要的樣式）
+    // Emoji Icon
+    function emojiIcon(emoji) {
+      return L.divIcon({
+        className: 'emoji-icon',
+        html: emoji,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
+      });
+    }
+
     const icons = {
-      water: L.icon({
-        iconUrl: "https://cdn-icons-png.flaticon.com/512/2910/2910768.png", // 水滴
-        iconSize: [30, 30]
-      }),
-      convenience: L.icon({
-        iconUrl: "https://openmoji.org/data/color/svg/1F3EA.svg", // 🏪 emoji
-        iconSize: [30, 30]
-      }),
-      market: L.icon({
-        iconUrl: "https://cdn-icons-png.flaticon.com/512/415/415682.png", // 蔬果
-        iconSize: [30, 30]
-      }),
-      park: L.icon({
-        iconUrl: "https://cdn-icons-png.flaticon.com/512/427/427735.png", // 樹
-        iconSize: [30, 30]
-      })
+      water: emojiIcon('💧'),
+      convenience: emojiIcon('🏪'),
+      market: emojiIcon('🍎'),
+      park: emojiIcon('🌳')
     };
 
     // 分類對應 OSM
@@ -84,13 +90,11 @@
       park: 'way["leisure"="park"](around:RADIUS,LAT,LON);'
     };
 
-    // 組合 Overpass Query
     function buildOverpassQuery(lat, lon, radius, selections) {
       if (!selections || selections.length === 0) return null;
       let body = '[out:json][timeout:25];(';
       for (const sel of selections) {
-        let fragment = categories[sel];
-        fragment = fragment
+        let fragment = categories[sel]
           .replace(/RADIUS/g, radius)
           .replace(/LAT/g, lat)
           .replace(/LON/g, lon);
@@ -100,8 +104,6 @@
       return body;
     }
 
-    // 搜尋並顯示
-    let searchMarkers = []; // 存放搜尋結果的 marker
     document.getElementById("searchBtn").addEventListener("click", () => {
       if (!userMarker) {
         alert("尚未取得定位");
@@ -109,22 +111,16 @@
       }
       const pos = userMarker.getLatLng();
       const checked = Array.from(document.querySelectorAll("input[type=checkbox]:checked")).map(c => c.value);
-      const radius = parseInt(document.getElementById("radiusInput").value) || 1000;
+      const radius = parseInt(document.getElementById("radiusInput").value, 10) || 500;
       const query = buildOverpassQuery(pos.lat, pos.lng, radius, checked);
       if (!query) {
         alert("請先選擇要搜尋的類別");
         return;
       }
 
-      // 清除舊的搜尋結果
-      searchMarkers.forEach(m => map.removeLayer(m));
-      searchMarkers = [];
-
       fetch("https://overpass-api.de/api/interpreter", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded"
-        },
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: "data=" + encodeURIComponent(query)
       })
       .then(r => r.json())
@@ -134,7 +130,6 @@
           const lon = el.lon || el.center?.lon;
           if (!lat || !lon) return;
 
-          // 判斷類別 → 設定 icon
           let matchedType = null;
           if (el.tags) {
             if (el.tags.amenity === "drinking_water") matchedType = "water";
@@ -148,7 +143,6 @@
             <b>${el.tags.name || matchedType || "地點"}</b><br>
             <a href="https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}" target="_blank">導航</a>
           `);
-          searchMarkers.push(marker);
         });
       })
       .catch(err => {
